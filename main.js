@@ -25,7 +25,9 @@ app.get('/', (req, res) => {
 const User = require('./models/User')
 app.post('/signup', async (req, res) => {
   try {
-    const { email, username, password } = req.body
+    const email = req.body.email?.toLowerCase()
+    const username = req.body.username?.toLowerCase()
+    const password = req.body.password
     console.log(`Received signup request: ${username}, ${email}, ${password}`)
     
     const existingEmail = await User.find({ email })
@@ -36,7 +38,24 @@ app.post('/signup', async (req, res) => {
       
     const user = new User({ username, email, password })
     await user.save()
-    res.status(200).send('User registered successfully.')
+
+    const payload = { id: user._id };
+
+    const accessToken = jwt.sign(payload, process.env.JWT_SECRET, {
+      expiresIn: '15m'
+    });
+
+    const refreshToken = jwt.sign(payload, process.env.REFRESH_SECRET, {
+      expiresIn: '30d'
+    });
+
+    console.log("Access Token: %s\nRefresh Token: %s\n", accessToken, refreshToken);
+
+    res.status(200).json({
+      message: 'User registered successfully.',
+      accessToken,
+      refreshToken
+    });
   } catch (error) {
     res.status(400).send('Error registering user: ' + error.message)
   }
@@ -44,7 +63,8 @@ app.post('/signup', async (req, res) => {
 
 app.post('/login', async (req, res) => {
   try {
-    const { username, password } = req.body
+    const username = req.body.username?.toLowerCase()
+    const password = req.body.password
     console.log(`Received login request: ${username}, ${password}`)
 
     const user = await User.findOne({ username })
