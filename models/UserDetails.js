@@ -5,12 +5,23 @@ const userDetailsSchema = new mongoose.Schema({
     email: { type: String, required: true, unique: true },
     createdAt: { type: Date, immutable: true },
 
+    fullName: { type: String, default: '' },
     profilePicture: { type: String, default: '' },
     bio: { type: String, default: '' },
-    phoneNumber: { type: String },
+    phoneNumber: { type: String, default: '' },
 
+    followers: { type: [String], default: [] },
+    following: { type: [String], default: [] },
+    posts: {
+        type: [{
+            imgUrl: { type: String, required: true },
+            timestamp: { type: Date, default: Date.now },
+            caption: { type: String, default: '' }
+        }],
+        default: []
+    }
 });
 
-const userDetails = mongoose.model('User', userDetailsSchema, 'userDetails');
+const UserDetails = mongoose.model('User', userDetailsSchema, 'userDetails');
 
-module.exports = userDetails;
+module.exports = UserDetails;
