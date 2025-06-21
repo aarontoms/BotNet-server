@@ -132,29 +132,79 @@ app.post('/token-refresh', (req, res) => {
 app.get('/refreshDetails', async (req, res) => {
   console.log("Received request to refresh user details")
   try {
-    const authHeader = req.headers['authorization'];
+    const authHeader = req.headers['authorization']
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       console.log("Authorization header missing or malformed")
-      return res.status(400).json({ message: 'Token missing or malformed.' });
+      return res.status(400).json({ message: 'Token missing or malformed.' })
     }
 
-    const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
+    const token = authHeader.split(' ')[1]
+    const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET)
 
     const userDetails = await UserDetails.findById(decoded.id)
-    console.log("Decoded user ID:", decoded.id)
+    // console.log("Decoded user ID:", decoded.id)
     if (!userDetails) {
       console.log("User details not found for ID:", decoded.id)
-      return res.status(404).json({ message: 'User not found.' });
+      return res.status(404).json({ message: 'User not found.' })
     }
 
     console.log("User details found:", userDetails)
-    res.status(200).json({ message: "User details refreshed successfully.", userDetails });
+    res.status(200).json({ message: "User details refreshed successfully.", userDetails })
   } catch (err) {
     // console.error("Error refreshing user details:", err)
-    res.status(401).json({ message: 'Invalid or expired token.' });
+    res.status(401).json({ message: 'Invalid or expired token.' })
   }
-});
+})
+
+app.post('/updateProfile', async (req, res) => {
+  try {
+    const authHeader = req.headers['authorization']
+    if (!authHeader || !authHeader.startsWith('Bearer '))
+      return res.status(401).json({ message: 'Token missing or malformed.' })
+    
+    const token = authHeader.split(' ')[1]
+    const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET)
+    const userId = decoded.id
+    
+    const updates = req.body
+    
+    const user = await UserDetails.findByIdAndUpdate(userId, updates, {
+      new: true,
+      runValidators: true
+    })
+    
+    console.log("User profile updated:", user)
+    res.status(200).json({ message: 'Profile updated', userDetails: user })
+  } catch (err) {
+    res.status(401).json({ message: 'Invalid or expired token.' })
+  }
+})
+
+const { upload } = require('./cloudinary')
+app.post('/uploadProfilePicture', upload.single('image'), async (req, res) => {
+  console.log("Received request to upload profile picture")
+  try {
+    const authHeader = req.headers['authorization']
+    if (!authHeader?.startsWith('Bearer '))
+      return res.status(401).json({ message: 'Missing token' })
+
+    const token = authHeader.split(' ')[1]
+    const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET)
+    const userId = decoded.id
+
+    const imageUrl = req.file.path
+
+    const updatedUser = await UserDetails.findByIdAndUpdate(
+      userId,
+      { profilePicture: imageUrl },
+      { new: true }
+    )
+
+    res.status(200).json({ message: 'Profile picture updated', userDetails: updatedUser })
+  } catch (err) {
+    res.status(401).json({ message: 'Invalid or expired token.' })
+  }
+})
 
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`)
