@@ -10,8 +10,8 @@ const userDetailsSchema = new mongoose.Schema({
     bio: { type: String, default: '' },
     phoneNumber: { type: String, default: '' },
 
-    followers: { type: [String], default: [] },
-    following: { type: [String], default: [] },
+    followers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    following: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     posts: {
         type: [{
             imgUrl: { type: String, required: true },

@@ -161,18 +161,18 @@ app.post('/updateProfile', async (req, res) => {
     const authHeader = req.headers['authorization']
     if (!authHeader || !authHeader.startsWith('Bearer '))
       return res.status(401).json({ message: 'Token missing or malformed.' })
-    
+
     const token = authHeader.split(' ')[1]
     const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET)
     const userId = decoded.id
-    
+
     const updates = req.body
-    
+
     const user = await UserDetails.findByIdAndUpdate(userId, updates, {
       new: true,
       runValidators: true
     })
-    
+
     console.log("User profile updated:", user)
     res.status(200).json({ message: 'Profile updated', userDetails: user })
   } catch (err) {
@@ -205,6 +205,87 @@ app.post('/uploadProfilePicture', upload.single('image'), async (req, res) => {
     res.status(401).json({ message: 'Invalid or expired token.' })
   }
 })
+
+app.get('/searchUsers', async (req, res) => {
+
+  const authHeader = req.headers['authorization'];
+  if (!authHeader?.startsWith('Bearer '))
+    return res.status(400).json({ message: 'Missing token' });
+
+  try {
+    const token = authHeader.split(' ')[1];
+    jwt.verify(token, process.env.JWT_ACCESS_SECRET);
+  } catch (err) {
+    return res.status(401).json({ message: 'Invalid or expired token' });
+  }
+
+  let query = req.query.q;
+  console.log("Received search request with query:", query);
+  if (!query) return res.status(200).json({ users: [] });
+
+  try {
+    const users = await UserDetails.find({
+      $or: [
+        { username: { $regex: query, $options: 'i' } },
+        { fullName: { $regex: query, $options: 'i' } }
+      ]
+    }).select('-__v');
+
+    res.status(200).json({ users });
+  } catch (err) {
+    res.status(500).json({ message: 'Search failed', error: err.message });
+  }
+});
+
+app.get('/getUserDetails/:username', async (req, res) => {
+  const authHeader = req.headers['authorization'];
+  if (!authHeader?.startsWith('Bearer '))
+    return res.status(400).json({ message: 'Missing token' });
+  
+  let currentUserId;
+  try {
+    const token = authHeader.split(' ')[1];
+    const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
+    currentUserId = decoded.id;
+  } catch (err) {
+    return res.status(401).json({ message: 'Invalid or expired token' });
+  }
+  
+  const targetUsername = req.params.username;
+  try {
+    const targetUser = await UserDetails.findOne({ username: targetUsername })
+      .populate('followers', '_id')
+      .populate('following', '_id');
+    console.log("User found:", targetUser);
+    
+    if (!targetUser) return res.status(404).json({ message: 'User not found' });
+
+    const isFollowing = targetUser.followers.some(f => f._id.toString() === currentUserId);
+
+    if (isFollowing || targetUser._id.toString() === currentUserId) {
+      const fullUser = await UserDetails.findById(targetUser._id)
+        .populate('followers', 'username fullName profilePicture')
+        .populate('following', 'username fullName profilePicture')
+        .select('-__v');
+      console.log("Full user details:", fullUser);
+      return res.status(200).json({ userDetails: fullUser });
+    } else {
+      const { username, fullName, bio, followers, following, posts } = targetUser;
+      return res.status(200).json({
+        userDetails: {
+          username,
+          fullName,
+          bio,
+          followersCount: followers.length,
+          followingCount: following.length,
+          postsCount: posts.length,
+        }
+      });
+    }
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to retrieve user details', error: err.message });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`)
