@@ -12,6 +12,7 @@ const userDetailsSchema = new mongoose.Schema({
 
     followers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     following: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    pendingRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     posts: {
         type: [{
             imgUrl: { type: String, required: true },

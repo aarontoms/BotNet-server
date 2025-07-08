@@ -3,9 +3,11 @@ const mongoose = require('mongoose')
 const dotenv = require('dotenv')
 const bcrypt = require('bcrypt')
 const jwt = require('jsonwebtoken')
+const cors = require('cors');
 
 const app = express()
 const PORT = process.env.PORT || 3000
+app.use(cors());
 
 dotenv.config()
 mongoose.connect(process.env.MONGO_URL, {
@@ -156,6 +158,19 @@ app.get('/refreshDetails', async (req, res) => {
   }
 })
 
+const extractUserId = (req) => {
+  const authHeader = req.headers['authorization'];
+  if (!authHeader?.startsWith('Bearer ')) return null;
+
+  try {
+    const token = authHeader.split(' ')[1];
+    const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
+    return decoded.id;
+  } catch {
+    return null;
+  }
+};
+
 app.post('/updateProfile', async (req, res) => {
   try {
     const authHeader = req.headers['authorization']
@@ -256,35 +271,143 @@ app.get('/getUserDetails/:username', async (req, res) => {
     const targetUser = await UserDetails.findOne({ username: targetUsername })
       .populate('followers', '_id')
       .populate('following', '_id');
-    console.log("User found:", targetUser);
     
     if (!targetUser) return res.status(404).json({ message: 'User not found' });
 
     const isFollowing = targetUser.followers.some(f => f._id.toString() === currentUserId);
+    const isRequested = targetUser.pendingRequests.some(r => r._id.toString() === currentUserId);
+    const isSelf = targetUser._id.toString() === currentUserId;
 
-    if (isFollowing || targetUser._id.toString() === currentUserId) {
-      const fullUser = await UserDetails.findById(targetUser._id)
+    if (isFollowing || isSelf) {
+      let fullUser = await UserDetails.findById(targetUser._id)
         .populate('followers', 'username fullName profilePicture')
         .populate('following', 'username fullName profilePicture')
         .select('-__v');
-      console.log("Full user details:", fullUser);
+      fullUser = {
+        ...fullUser.toObject(),
+        isFollowing,
+        isRequested,
+      };
       return res.status(200).json({ userDetails: fullUser });
     } else {
-      const { username, fullName, bio, followers, following, posts } = targetUser;
+      const { username, fullName, profilePicture, bio, followers, following, posts } = targetUser;
       return res.status(200).json({
         userDetails: {
           username,
           fullName,
+          profilePicture,
           bio,
           followersCount: followers.length,
           followingCount: following.length,
           postsCount: posts.length,
+          isFollowing,
+          isRequested,
         }
       });
     }
   } catch (err) {
     res.status(500).json({ message: 'Failed to retrieve user details', error: err.message });
   }
+});
+
+app.post('/sendFollowRequest/:username', async (req, res) => {
+  console.log("Received request to send follow request")
+  const currentUserId = extractUserId(req);
+  if (!currentUserId) return res.status(401).send('Unauthorized');
+
+  const targetUsername = req.params.username;
+  const targetUser = await UserDetails.findOne({ username: targetUsername });
+  if (!targetUser) return res.status(404).send('Target user not found');
+
+  if (!targetUser.pendingRequests.includes(currentUserId)) {
+    targetUser.pendingRequests.push(currentUserId);
+    await targetUser.save();
+  }
+
+  res.status(200).send('Follow request sent');
+});
+
+app.post('/removeFollowRequest/:username', async (req, res) => {
+  const currentUserId = extractUserId(req);
+  if (!currentUserId) return res.status(401).send('Unauthorized');
+
+  const targetUsername = req.params.username;
+  const targetUser = await UserDetails.findOne({ username: targetUsername });
+  if (!targetUser) return res.status(404).send('Target user not found');
+
+  targetUser.pendingRequests = targetUser.pendingRequests.filter(
+    (id) => id.toString() !== currentUserId
+  );
+  await targetUser.save();
+
+  res.status(200).send('Follow request removed');
+});
+
+app.post('/unfollowUser/:username', async (req, res) => {
+  const currentUserId = extractUserId(req);
+  if (!currentUserId) return res.status(401).send('Unauthorized');
+
+  const targetUsername = req.params.username;
+  const targetUser = await UserDetails.findOne({ username: targetUsername });
+  const currentUser = await UserDetails.findById(currentUserId);
+  if (!targetUser || !currentUser) return res.status(404).send('User not found');
+
+  targetUser.followers = targetUser.followers.filter(
+    (id) => id.toString() !== currentUserId
+  );
+  currentUser.following = currentUser.following.filter(
+    (id) => id.toString() !== targetUser._id.toString()
+  );
+
+  await targetUser.save();
+  await currentUser.save();
+
+  res.status(200).send('Unfollowed successfully');
+});
+
+app.get('/getFollowRequests', async (req, res) => {
+  const currentUserId = extractUserId(req);
+  if (!currentUserId) return res.status(401).send('Unauthorized');
+
+  try {
+    const user = await UserDetails.findById(currentUserId).populate('pendingRequests', 'username fullName profilePicture');
+    if (!user) return res.status(404).send('User not found');
+
+    res.status(200).json({ followRequests: user.pendingRequests });
+  } catch (err) {
+    res.status(500).send('Server error');
+  }
+});
+
+app.post('/acceptFollowRequest/:userID', async (req, res) => {
+  console.log("Received request to accept follow request")
+  const currentUserId = extractUserId(req);
+  if (!currentUserId) return res.status(401).send('Unauthorized');
+
+  const requesterId = req.params.userID;
+
+  const currentUser = await UserDetails.findById(currentUserId);
+  const requester = await UserDetails.findById(requesterId);
+
+  if (!currentUser || !requester) return res.status(404).send('User not found');
+
+  const requesterObjectId = new mongoose.Types.ObjectId(requesterId);
+
+  if (!currentUser.pendingRequests.some(id => id.equals(requesterObjectId))) {
+    return res.status(400).send('Follow request not found');
+  }
+
+  currentUser.followers.push(requesterObjectId);
+  requester.following.push(currentUser._id);
+
+  currentUser.pendingRequests = currentUser.pendingRequests.filter(
+    id => !id.equals(requesterObjectId)
+  );
+
+  await currentUser.save();
+  await requester.save();
+
+  res.status(200).send('Follow request accepted');
 });
 
 app.listen(PORT, () => {
